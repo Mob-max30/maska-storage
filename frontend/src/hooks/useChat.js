@@ -6,27 +6,24 @@ export function useChat() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  async function askQuestion(question) {
+  async function askQuestion(question, resourceIds = null) {
     setError(null);
     setLoading(true);
-
     setMessages((prev) => [...prev, { role: "user", content: question }]);
-    // placeholder assistant message we'll update as chunks stream in
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
-      await sendChatMessage(question, (partialText) => {
-        setMessages((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = {
-            role: "assistant",
-            content: partialText,
-          };
-          return updated;
-        });
-      });
+      const data = await sendChatMessage(question, resourceIds);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: data.answer,
+          citations: data.citations,
+          resourceIdsUsed: data.resource_ids_used,
+        },
+      ]);
     } catch (err) {
-      setError(err.message || "Chat failed");
+      setError(err.response?.data?.error?.message || "Chat failed");
     } finally {
       setLoading(false);
     }
