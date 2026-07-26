@@ -1,54 +1,57 @@
-import { BrowserRouter, Routes, Route, Link } from "react-router";
+import { BrowserRouter, Routes, Route, NavLink } from "react-router";
 import UploadPage from "./pages/UploadPage";
 import ChatPage from "./pages/ChatPage";
 import ArchivePage from "./pages/ArchivePage";
 
-function Landing() {
+const navItems = [
+  { to: "/chat", label: "Chat" },
+  { to: "/upload", label: "Upload" },
+  { to: "/archive", label: "Archive" },
+];
+
+function Sidebar() {
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-5xl font-bold text-white mb-4">
-          MaskaStorage
-        </h1>
-        <p className="text-lg text-gray-400">
-          AI-powered knowledge management — setup complete ✓
-        </p>
-        <div className="mt-8 flex gap-4 justify-center">
-          <Link
-            to="/upload"
-            className="px-6 py-3 bg-violet-600 text-white rounded-xl font-medium hover:bg-violet-500 transition-colors cursor-pointer"
-          >
-            Get Started
-          </Link>
-          <Link
-            to="/chat"
-            className="px-6 py-3 border border-gray-700 text-gray-300 rounded-xl font-medium hover:border-violet-500 hover:text-white transition-colors cursor-pointer"
-          >
-            Learn More
-          </Link>
-        </div>
+    <aside className="w-64 shrink-0 bg-[#171717] border-r border-white/10 flex flex-col">
+      <div className="px-4 py-4 border-b border-white/10">
+        <span className="text-white font-medium">MaskaStorage</span>
       </div>
-    </div>
+      <nav className="flex-1 p-2 space-y-1">
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            className={({ isActive }) =>
+              `block rounded-lg px-3 py-2 text-sm transition-colors ${isActive
+                ? "bg-white/10 text-white"
+                : "text-gray-400 hover:bg-white/5 hover:text-white"
+              }`
+            }
+          >
+            {item.label}
+          </NavLink>
+        ))}
+      </nav>
+      <div className="p-4 text-xs text-gray-500 border-t border-white/10">
+        RAG over your saved URLs and PDFs
+      </div>
+    </aside>
   );
 }
 
 function App() {
   return (
     <BrowserRouter>
-      {/* Temporary nav — Priyanshu to replace with final layout/nav components */}
-      <nav className="flex gap-4 p-4 border-b border-gray-800 bg-gray-950">
-        <Link to="/" className="text-white">Home</Link>
-        <Link to="/upload" className="text-white">Upload</Link>
-        <Link to="/chat" className="text-white">Chat</Link>
-        <Link to="/archive" className="text-white">Archive</Link>
-      </nav>
-
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/upload" element={<UploadPage />} />
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/archive" element={<ArchivePage />} />
-      </Routes>
+      <div className="flex h-screen bg-[#212121]">
+        <Sidebar />
+        <main className="flex-1 overflow-hidden">
+          <Routes>
+            <Route path="/" element={<ChatPage />} />
+            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/upload" element={<UploadPage />} />
+            <Route path="/archive" element={<ArchivePage />} />
+          </Routes>
+        </main>
+      </div>
     </BrowserRouter>
   );
 }
