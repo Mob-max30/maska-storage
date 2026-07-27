@@ -213,11 +213,7 @@ class ChromaDBManager:
 
         for chunk, embedding in zip(chunks, embeddings):
 
-            ids.append(
-
-                chunk["chunk_id"]
-
-            )
+            ids.append(f"{resource_id}_{chunk['chunk_id']}")
 
             vectors.append(
 
@@ -243,11 +239,16 @@ class ChromaDBManager:
 
                     "source_type": pipeline_result["source_type"],
 
-                    "summary": pipeline_result["summary"]
+                    "summary": pipeline_result["summary"].get("summary", "")
 
                 }
 
             )
+            print("\n===== METADATA =====")
+            for metadata in metadatas:
+                 for k, v in metadata.items():
+                      print(f"{k}: {type(v)} -> {repr(v)}")
+            print("====================\n")
 
         self.collection.add(
 
