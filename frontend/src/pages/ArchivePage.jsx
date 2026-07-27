@@ -1,48 +1,72 @@
 import { useArchive } from "../hooks/useArchive";
 
 const STATUS_STYLES = {
-  ready: "text-green-700 bg-green-50",
-  processing: "text-yellow-700 bg-yellow-50",
-  pending: "text-gray-700 bg-gray-50",
-  failed: "text-red-700 bg-red-50",
+  ready: "bg-green-500/10 text-green-400 border-green-500/20",
+  processing: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+  pending: "bg-white/5 text-gray-400 border-white/10",
+  failed: "bg-red-500/10 text-red-400 border-red-500/20",
 };
 
 export default function ArchivePage() {
   const { items, total, loading, error, removeItem } = useArchive();
 
-  if (loading) return <p className="p-6 text-gray-500">Loading archive...</p>;
-  if (error) return <p className="p-6 text-red-600">{error}</p>;
-
   return (
-    <div className="max-w-2xl mx-auto p-6">
-      <h1 className="text-2xl font-semibold mb-1">Archive</h1>
-      <p className="text-sm text-gray-500 mb-4">{total} resource(s)</p>
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-3xl px-4 py-12">
+        <h1 className="text-2xl font-medium text-white mb-2">Archive</h1>
+        <p className="text-sm text-gray-400 mb-8">
+          {loading ? "Loading…" : `${total} resource${total === 1 ? "" : "s"}`}
+        </p>
 
-      {items.length === 0 && <p className="text-gray-500">No items yet.</p>}
+        {error && (
+          <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {error}
+          </div>
+        )}
 
-      <ul className="space-y-2">
-        {items.map((item) => (
-          <li
-            key={item.id}
-            className="flex justify-between items-center border rounded px-3 py-2"
-          >
-            <div>
-              <span className="font-medium">{item.title || "Untitled"}</span>
-              <span
-                className={`ml-2 text-xs px-2 py-0.5 rounded ${STATUS_STYLES[item.status] || ""}`}
-              >
-                {item.status}
-              </span>
-            </div>
-            <button
-              onClick={() => removeItem(item.id)}
-              className="text-red-600 text-sm"
+        {!loading && !error && items.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-white/15 px-6 py-12 text-center">
+            <p className="text-sm text-gray-300">Nothing saved yet</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Upload a URL or PDF to get started.
+            </p>
+          </div>
+        )}
+
+        <div className="divide-y divide-white/5">
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className="group flex items-center justify-between gap-4 py-4"
             >
-              Remove
-            </button>
-          </li>
-        ))}
-      </ul>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm text-white">
+                    {item.title || "Untitled"}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${STATUS_STYLES[item.status] || STATUS_STYLES.pending
+                      }`}
+                  >
+                    {item.status}
+                  </span>
+                </div>
+                {item.summary && (
+                  <p className="mt-1 truncate text-xs text-gray-500">
+                    {item.summary}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => removeItem(item.id)}
+                className="shrink-0 rounded-lg px-3 py-1.5 text-xs text-gray-500 opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
