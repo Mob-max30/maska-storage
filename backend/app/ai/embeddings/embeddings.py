@@ -8,7 +8,7 @@ class EmbeddingGenerator:
     Responsible for:
     - Loading the embedding model
     - Generating embeddings for text chunks
-    - Returning structured chunk data with embeddings
+    - Generating embeddings for user queries
 
     This module does NOT perform:
     - Chunking
@@ -29,7 +29,7 @@ class EmbeddingGenerator:
 
     def generate(self, chunks: list) -> list:
         """
-        Generates embeddings for text chunks.
+        Generates embeddings for document text chunks.
 
         Args:
             chunks (list): List of chunk dictionaries.
@@ -71,3 +71,35 @@ class EmbeddingGenerator:
 
         except Exception as e:
             raise RuntimeError(f"Embedding Generation Error: {e}")
+
+    def generate_query_embedding(self, question: str) -> list[float]:
+        """
+        Generates an embedding for a user query.
+
+        This is used by the Retrieval Engine to perform similarity
+        search against stored document embeddings.
+
+        Args:
+            question (str): User's question.
+
+        Returns:
+            list[float]: Query embedding vector.
+        """
+
+        try:
+
+            if not isinstance(question, str):
+                raise ValueError("Question must be a string.")
+
+            if not question.strip():
+                raise ValueError("Question cannot be empty.")
+
+            embedding = self.model.encode(
+                question,
+                normalize_embeddings=True
+            )
+
+            return embedding.tolist()
+
+        except Exception as e:
+            raise RuntimeError(f"Query Embedding Error: {e}")
