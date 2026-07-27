@@ -226,41 +226,48 @@ class ChromaDBManager:
                 chunk["text"]
 
             )
-
             metadatas.append(
+    {
+                "resource_id": str(resource_id),
+                "title": str(document.get("title") or ""),
+                "filename": str(document.get("filename") or ""),
+                "source_type": str(pipeline_result.get("source_type") or ""),
+                "summary": str(
+                    pipeline_result.get("summary", {}).get("summary", "")
+        ),
+    }
+)           
+            
+                    
+        print("\n========== CHROMADB DEBUG ==========")
+        print(f"IDs: {len(ids)}")
+        print(f"Vectors: {len(embeddings)}")
+        print(f"Documents: {len(documents)}")
+        print(f"Metadatas: {len(metadatas)}")
+        print(f"Embedding dimension: {len(embeddings[0])}")
 
-                {
+        print("\nFirst metadata:")
+        for key, value in metadatas[0].items():
+            print(f"{key}: {type(value).__name__} -> {repr(value)}")
 
-                    "resource_id": resource_id,
+        print("====================================\n")
 
-                    "title": document.get("title"),
-
-                    "filename": document.get("filename"),
-
-                    "source_type": pipeline_result["source_type"],
-
-                    "summary": pipeline_result["summary"].get("summary", "")
-
-                }
-
+        try:
+            self.collection.add(
+                ids=ids,
+                embeddings=vectors,
+                documents=documents,
+                metadatas=metadatas,
             )
-            print("\n===== METADATA =====")
-            for metadata in metadatas:
-                 for k, v in metadata.items():
-                      print(f"{k}: {type(v)} -> {repr(v)}")
-            print("====================\n")
-
-        self.collection.add(
-
-            ids=ids,
-
-            embeddings=vectors,
-
-            documents=documents,
-
-            metadatas=metadatas,
-
-        )
+            print("✅ Successfully stored in ChromaDB")
+        except Exception as e:
+            print("❌ ChromaDB insertion failed")
+            print(type(e).__name__)
+            print(e)
+            raise
+        
+        
+         
 
         logger.info(
 

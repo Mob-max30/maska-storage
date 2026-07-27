@@ -265,6 +265,9 @@ def update_resource_status(
     # Set completed_at when pipeline finishes (either terminal state)
     if status in ("ready", "failed"):
         resource.completed_at = completed_at if completed_at is not None else _utcnow()
+    print(
+        f"UPDATE -> resource_id={resource_id}, status={status}, title={title}"
+)
 
     db.commit()
     db.refresh(resource)

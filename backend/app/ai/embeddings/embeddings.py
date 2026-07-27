@@ -46,24 +46,31 @@ class EmbeddingGenerator:
             if len(chunks) == 0:
                 raise ValueError("Chunk list is empty.")
 
-            result = []
-
+            # Validate all chunks before generating embeddings
             for chunk in chunks:
-
                 if "text" not in chunk:
                     raise ValueError("Chunk missing 'text' field.")
 
-                embedding = self.model.encode(
-                    chunk["text"],
-                    normalize_embeddings=True
-                )
+            # Collect all texts
+            texts = [chunk["text"] for chunk in chunks]
 
+            # Generate embeddings in batches (much faster)
+            embeddings = self.model.encode(
+                texts,
+                batch_size=32,
+                normalize_embeddings=True,
+                show_progress_bar=True,
+            )
+
+            result = []
+
+            for chunk, embedding in zip(chunks, embeddings):
                 result.append(
                     {
                         "chunk_id": chunk["chunk_id"],
                         "text": chunk["text"],
                         "length": chunk["length"],
-                        "embedding": embedding.tolist()
+                        "embedding": embedding.tolist(),
                     }
                 )
 

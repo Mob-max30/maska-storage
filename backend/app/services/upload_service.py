@@ -322,10 +322,18 @@ def _run_background_processing(
 
 )
 
+        summary_data = pipeline_result.get("summary", {})
+
         summary = (
-            pipeline_result.get("summary")
-            or ""
+            summary_data.get("summary", "")
+            if isinstance(summary_data, dict)
+            else str(summary_data)
+                   
+        
 )
+
+        import os
+        print("UPLOAD DB:", os.path.abspath(db.get_bind().url.database))
         
         #######################################################################
         # Update SQLite
@@ -334,14 +342,21 @@ def _run_background_processing(
         crud.update_resource_status(
             db=db,
             resource_id=resource_id,
-            status=ResourceStatus.READY,
+            status=ResourceStatus.READY.value,
             title=title,
             summary=summary,
-        )
+)
 
         logger.info(
             "Resource %s marked READY.",
             resource_id,
+        )
+        updated = crud.get_resource(db, resource_id)
+
+        print(
+            "AFTER UPDATE:",
+            updated.status,
+            updated.title,
         )
 
     ###########################################################################
@@ -360,7 +375,7 @@ def _run_background_processing(
             crud.update_resource_status(
                 db=db,
                 resource_id=resource_id,
-                status=ResourceStatus.FAILED,
+                status=ResourceStatus.FAILED.value,
                 error_message=str(exc),
             )
 
@@ -422,7 +437,7 @@ def create_url_upload(
         db=db,
         resource_id=resource_id,
         source_type=SourceType.URL,
-        status=ResourceStatus.PROCESSING,
+        status=ResourceStatus.PROCESSING.value,
         source_url=url,
     )
 
@@ -484,7 +499,7 @@ def create_pdf_upload(
         db=db,
         resource_id=resource_id,
         source_type=SourceType.PDF,
-        status=ResourceStatus.PROCESSING,
+        status=ResourceStatus.PROCESSING.value,
         filename=filename,
     )
 

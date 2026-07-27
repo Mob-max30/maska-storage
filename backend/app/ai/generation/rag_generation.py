@@ -18,11 +18,18 @@ ChromaDB and assembles a grounded prompt.
 This module is responsible for:
 
     • Receiving RetrievalResult from rag_retrieval.py
-    • Sending the prompt to the configured LLM
+    • Sending the prompt to the configured LLM (Gemini)
     • Parsing the generated response
     • Building structured citations
     • Returning a GenerationResult object
     • Providing helper utilities for ChatService
+
+NOTE (2026-07-27): Switched from OpenAI to Gemini. The OpenAI API key had
+no purchased credits (429 insufficient_quota), whereas Sriganesh's AI
+pipeline already calls Gemini successfully for summarization. This reuses
+the same GOOGLE_API_KEY / GEMINI_API_KEY env vars his code already reads —
+no separate key or config needed. Public interface (class/function names)
+is unchanged, so chat_service.py needs no changes.
 
 Pipeline
 --------
@@ -39,7 +46,7 @@ RetrievalResult
 GenerationEngine
       │
       ▼
-OpenAI GPT
+Gemini
       │
       ▼
 Grounded Answer
@@ -56,9 +63,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from openai import OpenAI
+from google import genai
+from google.genai import types as genai_types
 
-from app.core.config import get_settings
 from app.ai.retrieval.rag_retrieval import (
     RetrievalResult,
     RetrievedChunk,
@@ -70,7 +77,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 ###############################################################################
 
-DEFAULT_MODEL = "gpt-5"
+DEFAULT_MODEL = "gemini-3.6-flash"
 
 DEFAULT_TEMPERATURE = 0.2
 
@@ -121,9 +128,9 @@ class GenerationError(Exception):
     pass
 
 
-class OpenAIConnectionError(GenerationError):
+class GeminiConnectionError(GenerationError):
     """
-    Raised when the OpenAI API cannot be reached.
+    Raised when the Gemini API cannot be reached.
     """
     pass
 
@@ -181,13 +188,13 @@ class GenerationResult:
 
 
 ###############################################################################
-# OpenAI Wrapper
+# Gemini Wrapper
 ###############################################################################
 
 
-class OpenAIClient:
+class GeminiClient:
     """
-    Lightweight wrapper around the OpenAI SDK.
+    Lightweight wrapper around the google-genai SDK.
 
     Responsibilities
     ----------------
@@ -195,28 +202,32 @@ class OpenAIClient:
     • Hide SDK implementation details
     • Handle API failures
     • Return raw model responses
+
+    Deliberately takes NO api_key argument. genai.Client() auto-reads
+    GOOGLE_API_KEY / GEMINI_API_KEY from the environment — the exact
+    same variables Sriganesh's AI pipeline already uses (confirmed by
+    the "Using GOOGLE_API_KEY" log line during upload processing).
+    This guarantees both modules share one funded key, not two.
     """
 
     def __init__(self):
 
-        settings = get_settings()
+        try:
 
-        api_key = settings.llm_api_key
+            self.client = genai.Client()
 
-        if not api_key:
+        except Exception as exc:
 
-            raise OpenAIConnectionError(
-                "MASKA_LLM_API_KEY is not configured."
+            raise GeminiConnectionError(
+                f"Failed to initialize Gemini client. Make sure "
+                f"GOOGLE_API_KEY or GEMINI_API_KEY is set in the "
+                f"environment (same as the AI pipeline uses): {exc}"
             )
-
-        self.client = OpenAI(
-            api_key=api_key
-        )
 
         self.model = DEFAULT_MODEL
 
         logger.info(
-            "OpenAI client initialized using model '%s'.",
+            "Gemini client initialized using model '%s'.",
             self.model,
         )
 
@@ -232,37 +243,34 @@ class OpenAIClient:
         max_tokens: int = DEFAULT_MAX_TOKENS,
     ):
         """
-        Sends the prompt to OpenAI and returns the raw response.
+        Sends the prompt to Gemini and returns the raw response.
         """
 
         start = time.perf_counter()
 
         try:
 
-            response = self.client.chat.completions.create(
+            response = self.client.models.generate_content(
 
                 model=self.model,
 
-                temperature=temperature,
+                contents=prompt,
 
-                max_tokens=max_tokens,
+                config=genai_types.GenerateContentConfig(
 
-                messages=[
-                    {
-                        "role": "system",
-                        "content": SYSTEM_PROMPT,
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
+                    system_instruction=SYSTEM_PROMPT,
+
+                    temperature=temperature,
+
+                    max_output_tokens=max_tokens,
+
+                ),
             )
 
             elapsed = time.perf_counter() - start
 
             logger.info(
-                "OpenAI generation completed in %.2f seconds.",
+                "Gemini generation completed in %.2f seconds.",
                 elapsed,
             )
 
@@ -274,9 +282,11 @@ class OpenAIClient:
                 "Generation request failed."
             )
 
-            raise OpenAIConnectionError(
+            raise GeminiConnectionError(
                 str(exc)
             )
+
+
 ###############################################################################
 # Generation Engine
 ###############################################################################
@@ -290,7 +300,7 @@ class GenerationEngine:
     ----------------
     • Validate retrieval output
     • Skip unnecessary LLM calls
-    • Call OpenAI
+    • Call Gemini
     • Parse responses
     • Build citations
     • Return GenerationResult
@@ -298,7 +308,7 @@ class GenerationEngine:
 
     def __init__(self):
 
-        self.client = OpenAIClient()
+        self.client = GeminiClient()
 
         logger.info(
             "GenerationEngine initialized."
@@ -401,33 +411,19 @@ class GenerationEngine:
         generation_time: float,
     ) -> GenerationResult:
         """
-        Converts the raw OpenAI response into a
+        Converts the raw Gemini response into a
         structured GenerationResult.
         """
 
         if response is None:
 
             raise InvalidGenerationResponse(
-                "OpenAI returned None."
+                "Gemini returned None."
             )
 
-        if not response.choices:
+        answer = getattr(response, "text", None)
 
-            raise InvalidGenerationResponse(
-                "OpenAI returned zero choices."
-            )
-
-        message = response.choices[0].message
-
-        if message is None:
-
-            raise InvalidGenerationResponse(
-                "Assistant message missing."
-            )
-
-        answer = message.content
-
-        if answer is None:
+        if not answer:
 
             raise InvalidGenerationResponse(
                 "Generated answer is empty."
@@ -435,38 +431,26 @@ class GenerationEngine:
 
         usage = getattr(
             response,
-            "usage",
+            "usage_metadata",
             None,
         )
 
         prompt_tokens = (
-            getattr(
-                usage,
-                "prompt_tokens",
-                0,
-            )
+            getattr(usage, "prompt_token_count", 0) or 0
             if usage
             else 0
         )
 
         completion_tokens = (
-            getattr(
-                usage,
-                "completion_tokens",
-                0,
-            )
+            getattr(usage, "candidates_token_count", 0) or 0
             if usage
             else 0
         )
 
         total_tokens = (
-            getattr(
-                usage,
-                "total_tokens",
-                0,
-            )
+            getattr(usage, "total_token_count", 0) or 0
             if usage
-            else 0
+            else (prompt_tokens + completion_tokens)
         )
 
         citations = self._build_citations(
@@ -520,7 +504,8 @@ class GenerationEngine:
                 ),
             },
         )
-        ###########################################################################
+
+    ###########################################################################
     # Citation Builder
     ###########################################################################
 
@@ -615,7 +600,7 @@ def get_generation_engine() -> GenerationEngine:
     """
     Returns a singleton GenerationEngine.
 
-    Prevents recreating the OpenAI client for every request.
+    Prevents recreating the Gemini client for every request.
     """
 
     global _engine
@@ -688,6 +673,8 @@ def generate_from_question(
     return generate_answer(
         retrieval_result
     )
+
+
 ###############################################################################
 # Health Check
 ###############################################################################
@@ -698,7 +685,7 @@ def health_check() -> bool:
 
     Checks
     ------
-    • OpenAI client initialization
+    • Gemini client initialization
     • API key configuration
     • Model availability
 
@@ -716,7 +703,7 @@ def health_check() -> bool:
 
             logger.error(
                 "Generation health check failed: "
-                "OpenAI client missing."
+                "Gemini client missing."
             )
 
             return False
