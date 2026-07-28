@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { sendChatMessage } from "../services/chatService";
-
+import { sendChatMessage } from "../services/ChatService";
 export function useChat() {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);

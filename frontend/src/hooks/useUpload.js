@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { uploadUrl, uploadPdf } from "../services/uploadService";
+import { uploadUrl, uploadPdf } from "../services/UploadService";
 import { getArchiveItem } from "../services/archiveService";
 
 // 60 attempts x 3s = 3 minutes of polling before we give up.
