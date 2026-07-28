@@ -16,7 +16,7 @@ Beyond shipping a working app, the goal of this project is to demonstrate **good
 
 ## System Architecture
 
-```
+``` 
 User
   │
   ▼
