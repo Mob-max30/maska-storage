@@ -13,6 +13,9 @@ WORKDIR /app
 # Copy dependency list first (better Docker cache)
 COPY requirements.txt .
 
+# Upgrade pip
+RUN python -m pip install --upgrade pip setuptools wheel
+
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
