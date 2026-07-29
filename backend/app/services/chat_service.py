@@ -1,92 +1,60 @@
 """
 backend/app/services/chat_service.py
---------------------------------------
-Service layer for the RAG chat endpoint (POST /chat).
+-----------------------------------
 
-Responsibility
-~~~~~~~~~~~~~~
-This module owns the business logic for answering user questions. Routes
-call ``create_chat_response``; routes never invoke embeddings, ChromaDB, or
-LLMs directly.
+Service layer for the RAG chat endpoint.
 
-Current state: mock implementation
-    Returns a hard-coded answer with two citation snippets drawn from the
-    mock archive resources. When ``resource_ids`` is provided, mock
-    citations are filtered to matching IDs — this simulates scoped retrieval
-    so the frontend can test both scoped and global chat modes.
+Responsibilities
+----------------
+• Validate and orchestrate the Retrieval + Generation pipeline.
+• Call RetrievalEngine.
+• Call GenerationEngine.
+• Convert GenerationResult into ChatResponse.
+• Handle graceful failures.
 
-Integration points
-~~~~~~~~~~~~~~~~~~
-When the AI and retrieval layers are ready, ``create_chat_response`` will
-orchestrate the full RAG pipeline:
-
-    1. Embed the question              → Sriganesh's AI pipeline
-                                         (app.ai.embeddings)
-    2. Similarity search in ChromaDB   → Yeshneil's retrieval layer
-                                         (app.retrieval.vector_store)
-    3. Rank and select top-k chunks    → Yeshneil's retrieval layer
-    4. Build the LLM prompt            → Yeshneil's prompt builder
-    5. Call the LLM                    → Sriganesh's AI pipeline
-                                         (app.ai.llm_client)
-    6. Parse the response + citations  → this service
-    7. Return ChatResponse             → route serialises and returns
-
-The route must NEVER call any of those layers directly.
+Routes must NEVER call Retrieval or Generation directly.
 """
 
 from __future__ import annotations
 
 import logging
 
-from app.schemas import ChatResponse, CitationSnippet
+from app.schemas import (
+    ChatResponse,
+    CitationSnippet,
+)
+
+from app.ai.retrieval.rag_retrieval import (
+    retrieve_context,
+    extract_resource_ids,
+)
+
+from app.ai.generation.rag_generation import (
+    generate_answer,
+    GenerationError,
+)
 
 logger = logging.getLogger(__name__)
 
+###############################################################################
+# Configuration
+###############################################################################
 
-# ---------------------------------------------------------------------------
-# Mock data — single source of truth for chat stub citations.
-# Titles and IDs must match the archive mock store so the frontend can
-# cross-reference the two endpoints consistently.
-# ---------------------------------------------------------------------------
+DEFAULT_TOP_K = 5
 
-_MOCK_CITATIONS: list[dict] = [
-    {
-        "resource_id": "res_01j9k3m7xp0000000000000000",
-        "title": "Example Article Title",
-        "snippet": (
-            "Residual connections, introduced by He et al. (2016), allow gradients "
-            "to flow directly through skip connections, effectively solving the "
-            "vanishing gradient problem in very deep networks."
-        ),
-    },
-    {
-        "resource_id": "res_01j9k3m7xp0000000000000001",
-        "title": "Research Paper on Attention Mechanisms.pdf",
-        "snippet": (
-            "Attention mechanisms compute a weighted sum over all positions in a "
-            "sequence, enabling the model to capture long-range dependencies that "
-            "recurrent architectures struggle with."
-        ),
-    },
-]
-
-_MOCK_ANSWER = (
-    "Based on your saved resources, the key takeaways about neural networks are: "
-    "(1) depth improves representational power, "
-    "(2) residual connections mitigate vanishing gradients, and "
-    "(3) attention mechanisms enable long-range dependency modelling."
+NO_CONTEXT_MESSAGE = (
+    "I couldn't find enough information in the uploaded resources "
+    "to answer that question."
 )
 
-_NO_CONTEXT_ANSWER = (
-    "No relevant content was found in your saved resources "
-    "for the selected scope. Try uploading more resources or "
-    "broadening your search."
+INTERNAL_ERROR_MESSAGE = (
+    "An unexpected error occurred while processing your request. "
+    "Please try again."
 )
 
-
-# ---------------------------------------------------------------------------
-# Public function
-# ---------------------------------------------------------------------------
+###############################################################################
+# Public API
+###############################################################################
 
 
 def create_chat_response(
@@ -94,92 +62,225 @@ def create_chat_response(
     resource_ids: list[str] | None,
 ) -> ChatResponse:
     """
-    Run the RAG pipeline and return a grounded answer with citations.
+    Execute the complete Retrieval-Augmented Generation pipeline.
 
-    Parameters
-    ----------
-    question:
-        The user's validated, stripped natural-language question.
-        Validation (non-empty, non-whitespace) is enforced by the schema
-        before the route calls this function.
-    resource_ids:
-        Optional list of resource IDs to scope retrieval. ``None`` means
-        search across all ``ready`` resources.
+    Pipeline
 
-    Returns
-    -------
-    ChatResponse
-        Always a valid ChatResponse. When retrieval finds no relevant
-        context, ``citations`` and ``resource_ids_used`` will be empty
-        lists and ``answer`` will explain that no content was found.
-        This is NOT an error — the route returns HTTP 200 either way.
-
-    TODO(pannaga + sriganesh): replace step 1 with:
-        from app.ai.embeddings import embed_text
-        question_embedding = await embed_text(question)
-
-    TODO(pannaga + yeshneil): replace steps 2-4 with:
-        from app.retrieval.vector_store import similarity_search
-        from app.retrieval.prompt_builder import build_prompt
-        chunks = await similarity_search(
-            embedding=question_embedding,
-            resource_ids=resource_ids,  # None = search all
-            top_k=5,
-        )
-        prompt = build_prompt(question=question, chunks=chunks)
-
-    TODO(pannaga + sriganesh): replace step 5 with:
-        from app.ai.llm_client import generate_answer
-        raw_answer = await generate_answer(prompt)
-
-    TODO(pannaga): parse raw_answer into ChatResponse with proper citations
-        built from the retrieved chunks metadata.
+        User Question
+              │
+              ▼
+        Retrieval Engine
+              │
+              ▼
+        Similarity Search
+              │
+              ▼
+        Retrieved Chunks
+              │
+              ▼
+        Prompt Builder
+              │
+              ▼
+        Generation Engine
+              │
+              ▼
+        ChatResponse
     """
+
     logger.info(
-        "Chat request: question_length=%d scoped=%s resource_count=%s",
+        "Received chat request (question_length=%d, scoped=%s, resources=%s)",
         len(question),
         resource_ids is not None,
-        len(resource_ids) if resource_ids is not None else "all",
+        len(resource_ids) if resource_ids else "ALL",
     )
 
-    # --- STUB: filter mock citations by requested resource_ids ---------------
-    if resource_ids is not None:
-        citations_data = [
-            c for c in _MOCK_CITATIONS
-            if c["resource_id"] in resource_ids
+    try:
+
+        #######################################################################
+        # Retrieval
+        #######################################################################
+
+        retrieval_result = retrieve_context(
+            question=question,
+            resource_ids=resource_ids,
+            top_k=DEFAULT_TOP_K,
+        )
+
+        #######################################################################
+        # No Context
+        #######################################################################
+
+        if not retrieval_result.chunks:
+
+            logger.info(
+                "No relevant chunks retrieved."
+            )
+
+            return ChatResponse(
+                answer=NO_CONTEXT_MESSAGE,
+                citations=[],
+                resource_ids_used=[],
+            )
+
+        logger.info(
+            "Retrieved %d chunks.",
+            len(retrieval_result.chunks),
+        )
+
+        #######################################################################
+        # Generation
+        #######################################################################
+
+        generation_result = generate_answer(
+            retrieval_result
+        )
+
+        #######################################################################
+        # Convert Citations
+        #######################################################################
+
+        citations = [
+
+            CitationSnippet(
+
+                resource_id=citation.resource_id,
+
+                title=citation.title,
+
+                snippet=citation.snippet,
+
+            )
+
+            for citation in generation_result.citations
+
         ]
-    else:
-        citations_data = list(_MOCK_CITATIONS)
 
-    # --- STUB: graceful empty-context response --------------------------------
-    if not citations_data:
-        logger.info("Chat: no matching citations for scope, returning no-context answer")
+        #######################################################################
+        # Resource IDs Used
+        #######################################################################
+
+        resource_ids_used = extract_resource_ids(
+            retrieval_result.chunks
+        )
+
+        #######################################################################
+        # Build Response
+        #######################################################################
+
+        logger.info(
+            "Returning grounded response with %d citations.",
+            len(citations),
+        )
+
         return ChatResponse(
-            answer=_NO_CONTEXT_ANSWER,
+
+            answer=generation_result.answer,
+
+            citations=citations,
+
+            resource_ids_used=resource_ids_used,
+
+        )
+
+    ###########################################################################
+    # Expected Generation / Retrieval Errors
+    ###########################################################################
+
+    except GenerationError as exc:
+
+        logger.exception(
+            "Generation failed."
+        )
+
+        return ChatResponse(
+
+            answer=str(exc)
+            if str(exc)
+            else INTERNAL_ERROR_MESSAGE,
+
             citations=[],
+
             resource_ids_used=[],
+
         )
 
-    # --- STUB: build response from mock data ---------------------------------
-    citations = [
-        CitationSnippet(
-            resource_id=c["resource_id"],
-            title=c["title"],
-            snippet=c["snippet"],
-        )
-        for c in citations_data
-    ]
-    # Preserve insertion order and deduplicate
-    seen: set[str] = set()
-    resource_ids_used: list[str] = []
-    for c in citations_data:
-        rid = c["resource_id"]
-        if rid not in seen:
-            seen.add(rid)
-            resource_ids_used.append(rid)
+    ###########################################################################
+    # Unexpected Errors
+    ###########################################################################
 
-    return ChatResponse(
-        answer=_MOCK_ANSWER,
-        citations=citations,
-        resource_ids_used=resource_ids_used,
+    except Exception:
+
+        logger.exception(
+            "Unexpected error during chat pipeline."
+        )
+
+        return ChatResponse(
+
+            answer=INTERNAL_ERROR_MESSAGE,
+
+            citations=[],
+
+            resource_ids_used=[],
+
+        )
+
+
+###############################################################################
+# Convenience Wrapper
+###############################################################################
+
+def ask(
+    question: str,
+    resource_ids: list[str] | None = None,
+) -> ChatResponse:
+    """
+    Convenience wrapper for testing.
+
+    Equivalent to:
+
+        create_chat_response(...)
+    """
+
+    return create_chat_response(
+        question=question,
+        resource_ids=resource_ids,
     )
+
+
+###############################################################################
+# Health Check
+###############################################################################
+
+def health_check() -> bool:
+    """
+    Verifies that both Retrieval and Generation
+    subsystems are operational.
+    """
+
+    try:
+
+        from app.ai.retrieval.rag_retrieval import (
+            health_check as retrieval_health,
+        )
+
+        from app.ai.generation.rag_generation import (
+            health_check as generation_health,
+        )
+
+        return (
+            retrieval_health()
+            and generation_health()
+        )
+
+    except Exception:
+
+        logger.exception(
+            "Chat service health check failed."
+        )
+
+        return False
+
+
+###############################################################################
+# End of File
+###############################################################################
