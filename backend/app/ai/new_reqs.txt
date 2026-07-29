@@ -1,0 +1,9 @@
+requests==2.32.5
+trafilatura==2.0.0
+PyMuPDF==1.26.3
+langchain-text-splitters==0.3.9
+sentence-transformers==5.1.0
+langdetect==1.0.9
+yake==0.6.0
+python-dotenv==1.1.1
+google-genai==2.14.0

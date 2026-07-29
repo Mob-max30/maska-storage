@@ -103,7 +103,10 @@ def list_archive(
 def get_archive_item(
     resource_id: str,
     db: Session = Depends(get_db),
-) -> ArchiveItemDetail:
+) -> ArchiveItemDetail:    
+    import os    
+    print("ARCHIVE DB:", os.path.abspath(db.get_bind().url.database))
+    
     """
     Delegate to archive_service.get_resource. Raise 404 if not found.
     """
